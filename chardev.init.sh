@@ -10,6 +10,7 @@ group="staff"
 gnome-terminal -- dmesg -wH / &
 
 #compile driver
+make clean
 make
 
 

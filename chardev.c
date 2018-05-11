@@ -10,18 +10,18 @@
 #include <linux/fs_struct.h>
 #include <asm/uaccess.h>        /* for function put_user */
 
+// #define SUCCESS "Survive your PhD program"
+#define SUCCESS 0
+#define DEVICE_NAME "chardev"   /* Dev name as it appears in /proc/devices   */
+#define BUF_LEN 80              /* Max length of the message from the device */
 
 /* Prototypes - this would normally go in a .h file */
-int init_module(void);
-void cleanup_module(void);
+int born_module(void);
+void die_module(void);
 static int device_open(struct inode *, struct file *);
 static int device_release(struct inode *, struct file *);
 static ssize_t device_read(struct file *, char *, size_t, loff_t *);
 static ssize_t device_write(struct file *, const char *, size_t, loff_t *);
-
-#define SUCCESS 0
-#define DEVICE_NAME "chardev"   /* Dev name as it appears in /proc/devices   */
-#define BUF_LEN 80              /* Max length of the message from the device */
 
 
 /* Global variables are declared as static, so are global within the file. */
@@ -38,21 +38,16 @@ static struct file_operations fops = {
 };
 
 
-
 /* This function is called when the module is loaded */
-int init_module(void){
+int born_module(void){
+  printk(KERN_INFO "\n\n");
+  printk(KERN_ALERT "%s.born_module()\n",DEVICE_NAME);
   Major = register_chrdev(0, DEVICE_NAME, &fops);
-
   if (Major < 0) {
-    printk(KERN_ALERT "Registering char device failed with %d\n", Major);
+    printk(KERN_ALERT "ERROR registering char device with major number %d\n", Major);
     return Major;
   }
-
-
-  printk(KERN_ALERT "Module %s inserted\n",DEVICE_NAME);
-  
-  printk(KERN_INFO "I was assigned major number %d.\n", Major);
-  printk(KERN_INFO "To talk to the driver, create a dev file with:\n");
+  printk(KERN_INFO "My major is %d, create a dev file with:\n", Major);
   printk(KERN_INFO "   mknod /dev/%s c %d 0\n", DEVICE_NAME, Major);
   return SUCCESS;
 }
@@ -60,12 +55,19 @@ int init_module(void){
 
 
 /* This function is called when the module is unloaded */
-void cleanup_module(void)
-{
-  // Unregister the device
+void die_module(void){
+  // Unregister the device from file /proc/devices
   unregister_chrdev(Major, DEVICE_NAME);
-  printk(KERN_ALERT "Module %s removed\n",DEVICE_NAME);
+  printk(KERN_ALERT "%s.die_module()\n",DEVICE_NAME);
 }
+// If the function is called init_module(), and cleanup_module,
+// there is no need of these lines
+module_init(born_module);
+module_exit(die_module);
+
+
+
+
 
 
 
@@ -78,17 +80,13 @@ void cleanup_module(void)
 
 static int device_open(struct inode *inode, struct file *file){
   static int counter = 1;
-
+  printk(KERN_INFO "%s.device_open()\n",DEVICE_NAME);
   if (Device_Open)
     return -EBUSY;
-
   Device_Open++;
   sprintf(msg, "Whatsup world %d times!\n", counter++);
   msg_Ptr = msg;
   try_module_get(THIS_MODULE);
-
-  printk(KERN_INFO "Module %s opened\n",DEVICE_NAME);
-  
   return SUCCESS;
 }
 
@@ -99,14 +97,12 @@ static int device_open(struct inode *inode, struct file *file){
 // Called when a process closes the device file.
 
 static int device_release(struct inode *inode, struct file *file){
-    Device_Open--; // We're now ready for our next caller
-
-  /* 
-   * Decrement the usage count, or else once you opened the file,
+  printk(KERN_INFO "%s.device_release()\n\n",DEVICE_NAME);
+  Device_Open--; // We're now ready for our next caller
+  /* Decrement the usage count, or else once you opened the file,
    * never get get rid of the module. 
    */
   module_put(THIS_MODULE);
-  printk(KERN_INFO "Module %s released\n",DEVICE_NAME);
   return 0;
 }
 
@@ -121,39 +117,21 @@ static ssize_t device_read(struct file *filp,   /* see include/linux/fs.h   */
                            char *buffer,        /* buffer to fill with data */
                            size_t length,       /* length of the buffer     */
                            loff_t * offset){
-  /*
-   * Number of bytes actually written to the buffer 
-   */
-  int bytes_read = 0;
-
-  /*
-   * If we're at the end of the message, 
-   * return 0 signifying end of file 
-   */
+  int bytes_read = 0;// Number of bytes actually written to the buffer
+  printk(KERN_INFO "%s.device_read()\n",DEVICE_NAME);
+  // If we're at the end of the message, return 0 signifying end of file
   if (*msg_Ptr == 0) return 0;
+  while (length && *msg_Ptr) {// Actually put the data into the buffer
 
-  /* 
-   * Actually put the data into the buffer 
-   */
-  while (length && *msg_Ptr) {
-
-    /* 
-     * The buffer is in the user data segment, not the kernel 
+    /* The buffer is in the user data segment, not the kernel 
      * segment so "*" assignment won't work.  We have to use 
      * put_user which copies data from the kernel data segment to
-     * the user data segment. 
-     */
+     * the user data segment. */
     put_user(*(msg_Ptr++), buffer++);
-
     length--;
     bytes_read++;
   }
-
-  printk(KERN_INFO "Module %s read\n",DEVICE_NAME);
-
-  /* 
-   * Most read functions return the number of bytes put into the buffer
-   */
+  //Most read functions return the number of bytes put into the buffer
   return bytes_read;
 }
 
@@ -165,8 +143,9 @@ static ssize_t device_read(struct file *filp,   /* see include/linux/fs.h   */
 
 static ssize_t
 device_write(struct file *filp, const char *buff, size_t len, loff_t * off){
-  printk(KERN_ALERT "Sorry, this operation isn't supported.\n");
-  printk(KERN_INFO "Module %s written\n",DEVICE_NAME);
+  printk(KERN_INFO "%s.device_write()\n",DEVICE_NAME);
+  printk(KERN_ALERT "You can not write here.\n");
+  
   return -EINVAL;
 }
 
