@@ -4,7 +4,7 @@
 #include <unistd.h>
 
 #define DEVICE "/dev/dummy_two"
-#define BUF_SIZE 64
+#define BUF_SIZE 4096
 
 int main(){
   int fd;

@@ -1,4 +1,4 @@
-obj-m := dummy_two.o
+obj-m := lkmc_mmap.o
 
 KERNEL_DIR = /usr/src/linux-headers-$(shell uname -r)
 
@@ -6,5 +6,4 @@ all:
 	$(MAKE) -C $(KERNEL_DIR) SUBDIRS=$(PWD) modules
 
 clean:
-	rm -rf *.o *.mod.* *.symvers *.order .*.ko.cmd .*.o.cmd *~
-#	rm *.ko
+	rm -rf *.o *.ko *.mod.* *.symvers *.order *~
