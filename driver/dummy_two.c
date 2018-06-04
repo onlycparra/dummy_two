@@ -6,10 +6,11 @@
 #include <linux/uaccess.h>   //copy_to_user, copy_from_user
 #include <linux/slab.h>      //kmalloc, kfree
 #include <linux/mm.h>        //vm_area_struct, PAGE_SIZE
+#include "../include/ioctl_commands.h" //DUMMY_SYNC
 
 //struct for device
 struct Dummy_device{
-  char* data;                  //*****************
+  char* data;
   unsigned long size;
   struct semaphore sem;
 } dum_dev;
@@ -27,17 +28,18 @@ int device_open(struct inode *inode, struct file *filp);
 ssize_t device_read(struct file* filp, char* userBuffer, size_t bufCount, loff_t* curOffset);
 ssize_t device_write(struct file* filp, const char* userBuffer, size_t bufCount, loff_t* curOffset);
 int device_close(struct inode *inode, struct file *filp);
-int device_mmap(struct file *filp, struct vm_area_struct *vma);  //********************
-
+int device_mmap(struct file *filp, struct vm_area_struct *vma);
+long device_ioctl(struct file *filp, unsigned int cmd, unsigned long arg);
 
 // tell the kernel what functions to call when the user operates in our device file.
 struct file_operations fops = {
-  .owner = THIS_MODULE,
-  .open = device_open,
-  .release = device_close,
-  .write = device_write,
-  .read = device_read,
-  .mmap = device_mmap      //**********************
+  .owner           = THIS_MODULE,
+  .open            = device_open,
+  .release         = device_close,
+  .write           = device_write,
+  .read            = device_read,
+  .mmap            = device_mmap,
+  .unlocked_ioctl  = device_ioctl
 };
 
 
@@ -47,7 +49,7 @@ struct file_operations fops = {
 //////////////////////////////////////////////////////////////
 
 int device_open(struct inode *inode, struct file *filp){
-  printk(KERN_INFO DEVICE_NAME ": [opening]\n");
+  printk(KERN_WARNING DEVICE_NAME ": [opening]\n");
   ret = down_interruptible(&dum_dev.sem);
   if(ret != 0){
     printk(KERN_ALERT DEVICE_NAME ":     could not lock device during open\n");
@@ -66,12 +68,12 @@ int device_open(struct inode *inode, struct file *filp){
   
   dum_dev.size=PAGE_SIZE;
   printk(KERN_INFO DEVICE_NAME ":     %ld bytes allocated for the device\n", dum_dev.size);
-  printk(KERN_INFO DEVICE_NAME ": [opened]\n");
+  printk(KERN_INFO DEVICE_NAME ":     opened\n");
   return 0;
 }
 
 ssize_t device_read(struct file* filp, char* userBuffer, size_t bufCount, loff_t* curOffset){
-  printk(KERN_INFO DEVICE_NAME ": [reading]\n");
+  printk(KERN_WARNING DEVICE_NAME ": [reading]\n");
   if(bufCount > dum_dev.size){
     bufCount = dum_dev.size;
     printk(KERN_INFO DEVICE_NAME ":     data read truncated to %ld\n",dum_dev.size);
@@ -81,12 +83,12 @@ ssize_t device_read(struct file* filp, char* userBuffer, size_t bufCount, loff_t
   // copy_to_user(to,from,size)
   printk(KERN_INFO DEVICE_NAME ":     reading %ld chars from device\n",bufCount);
   ret = copy_to_user(userBuffer,dum_dev.data,bufCount);
-  printk(KERN_INFO DEVICE_NAME ": [read]\n");
+  printk(KERN_INFO DEVICE_NAME ":     read\n");
   return ret;
 }
 
 ssize_t device_write(struct file* filp, const char* userBuffer, size_t bufCount, loff_t* curOffset){
-  printk(KERN_INFO DEVICE_NAME ": [writing]\n");
+  printk(KERN_WARNING DEVICE_NAME ": [writing]\n");
   if(bufCount > dum_dev.size){
     bufCount = dum_dev.size;
     printk(KERN_INFO DEVICE_NAME ":     data to write truncated to %ld\n",dum_dev.size);
@@ -96,13 +98,14 @@ ssize_t device_write(struct file* filp, const char* userBuffer, size_t bufCount,
   // copy_from_user(to,from,size)
   ret = copy_from_user(dum_dev.data,userBuffer,bufCount);
   printk(KERN_INFO DEVICE_NAME ":     %ld chars written into device\n",bufCount);
-  printk(KERN_INFO DEVICE_NAME ": [written]\n");
+  printk(KERN_INFO DEVICE_NAME ":     written\n");
   return ret;
 }
 
 //mmap method, maps allocated memory into userspace
 
 int device_mmap(struct file *filp, struct vm_area_struct *vma){
+  printk(KERN_WARNING DEVICE_NAME ": [mmaping]\n");
   /**
    * remap_pfn_range - remap kernel memory to userspace
    * int remap_pfn_range(struct vm_area_struct* vma, // user vma to map to 
@@ -119,24 +122,38 @@ int device_mmap(struct file *filp, struct vm_area_struct *vma){
 		     vma->vm_page_prot))
     return -EAGAIN;
   vma->vm_flags |= VM_LOCKED | (VM_DONTEXPAND | VM_DONTDUMP);
+  printk(KERN_INFO DEVICE_NAME ":     mmaped\n");
+  return 0;
+}
+
+long device_ioctl(struct file *filp, unsigned int cmd, unsigned long arg){
+  printk(KERN_WARNING DEVICE_NAME ": [ioctl-ing]\n");
+  switch(cmd){
+  case DUMMY_SYNC:
+    printk(KERN_INFO DEVICE_NAME ":     command 1001\n");
+    break;
+  default:
+    printk(KERN_INFO DEVICE_NAME ":     command %d not valid\n",cmd);
+  }
+  printk(KERN_INFO DEVICE_NAME ":     ioctled\n");
   return 0;
 }
 
 int device_close(struct inode *inode, struct file *filp){
-  printk(KERN_INFO DEVICE_NAME ": [closing]\n");
+  printk(KERN_WARNING DEVICE_NAME ": [closing]\n");
   if(dum_dev.size>0){
     free_page((unsigned long)dum_dev.data);
     printk(KERN_INFO DEVICE_NAME ":     %ld bytes released from the device\n", dum_dev.size);
     dum_dev.size=0;
   }
   up(&dum_dev.sem);
-  printk(KERN_INFO DEVICE_NAME ": [closed]\n");
+  printk(KERN_INFO DEVICE_NAME ":     closed\n");
   return 0;
 }
 
 
 static int driver_entry(void){
-  printk(KERN_INFO "\n" DEVICE_NAME ": [[registring]]\n");
+  printk(KERN_WARNING "\n" DEVICE_NAME ": [[registring]]\n");
   // register the device with the system:
   // (step 1) dynamic allocation of device major number
   // alloc_chardev_region(dev_t*, uint fminor, uint count, char* name)
@@ -164,18 +181,18 @@ static int driver_entry(void){
 
   //(step 4) initialize semaphore
   sema_init(&dum_dev.sem,1);   // initial value 1, it can access only one thread at the time.
-  printk(KERN_INFO DEVICE_NAME ": [[registred]]\n");
+  printk(KERN_INFO DEVICE_NAME ":     registred\n");
   return 0;
 }
 
 static void driver_exit(void){
-  printk(KERN_INFO DEVICE_NAME ": [[removing]]\n");
+  printk(KERN_WARNING DEVICE_NAME ": [[removing]]\n");
   // remove char device from system
   cdev_del(my_char_dev);
 
   // deallocate device major number
   unregister_chrdev_region(dev_num,1);
-  printk(KERN_INFO DEVICE_NAME ": [[device removed from kernel]]\n");
+  printk(KERN_INFO DEVICE_NAME ":     device removed from kernel\n");
 }
 
 
