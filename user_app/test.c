@@ -6,7 +6,17 @@
 #include <sys/mman.h> // flag definitions: PROT_READ, ...
 #include <string.h> // strcmp(), strncpy()
 #include <sys/ioctl.h> // ioctl()
-#include "../include/ioctl_commands.h" //DUMMY_SYNC
+//#include "../include/ioctl_commands.h" //DUMMY_SYNC
+
+//struct for ioctl queries
+struct io_t{
+  unsigned long* data;
+  unsigned long size;
+};
+
+#define DUMMY_SYNC   _IO('q', 1001)
+#define DUMMY_WRITE _IOW('q', 1002, struct io_t*)
+#define DUMMY_READ  _IOW('q', 1003, struct io_t*)
 
 //colors
 #define RES   "\033[0m"
@@ -31,11 +41,15 @@ int main(){
   char* maped_mem = NULL;
   long page_size = sysconf(_SC_PAGE_SIZE);
   char menu[] =
-    RED " dr" RES ": driver read     │" CYA " mm" RES ": perform mmap    \n"
-    RED " dw" RES ": driver write    │" CYA " mu" RES ": perform munmap  \n"
-    GRE " ur" RES ": user read       │                                   \n"
-    GRE " uw" RES ": user write      │" RES " h " RES ": shows this menu \n"
-    MAG " io" RES ": perform ioctl   │" RES " ex" RES ": exit            \n";
+    RED " dr" RES ": driver read     │" MAG " is" RES ": ioctl sync      \n"
+    RED " dw" RES ": driver write    │" MAG " iw" RES ": ioctl write     \n"
+    GRE " ur" RES ": user read       │" MAG " ir" RES ": ioctl read      \n"
+    GRE " uw" RES ": user write      │                                   \n"
+    CYA " mm" RES ": perform mmap    │" RES " h " RES ": shows this menu \n"
+    CYA " mu" RES ": perform munmap  │" RES " ex" RES ": exit            \n";
+
+
+
   
   fd=open(DEVICE,O_RDWR); //open for reading and writing
   if(fd==-1){
@@ -103,12 +117,37 @@ int main(){
       }
     }
     
-    else if(!strcmp(option,"io")){
-      printf(MAG "  Perform ioctl\n" RES);
+    else if(!strcmp(option,"is")){
+      printf(MAG "  ioctl sync (not implemented)\n" RES);
       if(!ioctl(fd,DUMMY_SYNC,0)){
-	printf("  sync successful\n");
+	printf("  successful\n");
       }else{
-	printf(BRE "  couldn't sync\n" RES);
+	printf(BRE "  fail\n" RES);
+      }
+    }
+
+    else if(!strcmp(option,"iw")){
+      struct io_t umem;
+      printf(MAG "  ioctl write\n" RES);
+      printf("  data: ");
+      if(!scanf("%[^\n]",(char*)umem.data)){//store everything up to just before \n
+	printf("  No modification\n");
+      }else{
+	umem.size=strlen((char*)umem.data);
+	if(!ioctl(fd,DUMMY_WRITE,&umem)){
+	  printf("  successful\n");
+	}else{
+	  printf(BRE "  fail\n" RES);
+	}
+      }
+    }
+
+    else if(!strcmp(option,"ir")){
+      printf(MAG "  ioctl read (not implemented)\n" RES);
+      if(!ioctl(fd,DUMMY_READ,0)){
+	printf("  successful\n");
+      }else{
+	printf(BRE "  fail\n" RES);
       }
     }
 
