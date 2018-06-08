@@ -10,7 +10,7 @@
 
 //struct for device
 struct Dummy_device{
-  char* data;
+  unsigned long* data;
   unsigned long size;
   struct semaphore sem;
 } dum_dev;
@@ -48,7 +48,8 @@ struct file_operations fops = {
 ////////////////////// DEFINITIONS ///////////////////////////
 //////////////////////////////////////////////////////////////
 
-int device_open(struct inode *inode, struct file *filp){
+/*
+int device_open_2(struct inode *inode, struct file *filp){
   printk(KERN_WARNING DEVICE_NAME ": [opening]\n");
   ret = down_interruptible(&dum_dev.sem);
   if(ret != 0){
@@ -56,19 +57,58 @@ int device_open(struct inode *inode, struct file *filp){
     return ret;
   }
 
-  //allocate page
-  dum_dev.size=0;
-  //dum_dev.data = (char*) kmalloc(size in bytes,GFP_KERNEL); //may give memory not page-aligned
-  dum_dev.data = (char*) get_zeroed_page(GFP_KERNEL);
-  
-  if(dum_dev.data == NULL){
-    printk(KERN_ALERT DEVICE_NAME ":     could not allocate memory\n");
-    return -1;
+  arm_smccc_smc(OPTEE_SMC_OPEN_DUMMY, 0, 0, 0, 0, 0, 0, 0, &res);
+  if(res.a0 == OPTEE_SMC_RETURN_OK){
+    printk(KERN_INFO "DUMMY DRV: device_open ... SUCCESS\n");
+    if(res.a1 == OPTEE_SMC_OPEN_DUMMY_SUCCESS) {
+      printk(KERN_INFO "DUMMY DRV: device_open ... called smc call :");
+      dum_dev.data = (unsigned long*) get_zeroed_page(GFP_KERNEL);
+      if(dum_dev.data == NULL){
+	printk(KERN_ALERT DEVICE_NAME ":     could not allocate memory\n");
+	return -1;
+      }
+      dum_dev.size=PAGE_SIZE;
+
+    }
+    else
+      printk(KERN_INFO "DUMMY DRV: device_open ... called smc call :");
   }
-  
-  dum_dev.size=PAGE_SIZE;
-  printk(KERN_INFO DEVICE_NAME ":     %ld bytes allocated for the device\n", dum_dev.size);
+
   printk(KERN_INFO DEVICE_NAME ":     opened\n");
+  return 0;
+}
+*/
+
+
+
+
+
+
+int device_open(struct inode *inode, struct file *filp){
+  printk(KERN_WARNING DEVICE_NAME ": [opening]\n");
+  ret = down_interruptible(&dum_dev.sem);
+  if(ret != 0){
+    printk(KERN_ALERT DEVICE_NAME ":     could not lock device during open\n");
+    return ret;
+  }
+  arm_smccc_smc(OPTEE_SMC_OPEN_DUMMY, 0, 0, 0, 0, 0, 0, 0, &res);
+  if(res.a0 == OPTEE_SMC_RETURN_OK){
+    printk(KERN_INFO DEVICE_NAME ":     smc call... SUCCESS\n");
+    if(res.a1 == OPTEE_SMC_OPEN_DUMMY_SUCCESS) {
+      printk(KERN_INFO DEVICE_NAME ":     secure_device_open... SUCCESS\n");
+      dum_dev.data = (unsigned long*) get_zeroed_page(GFP_KERNEL);
+      dum_dev.size = 0;
+      if(!dum_dev.data){
+	printk(KERN_ALERT DEVICE_NAME ":     kernel could not allocate memory\n");
+	return -1;
+      }
+      dum_dev.size=PAGE_SIZE;
+      printk(KERN_INFO DEVICE_NAME ":     kernel %ld bytes allocated for the device\n", dum_dev.size);
+    }else{
+      printk(KERN_INFO DEVICE_NAME ":     secure_device_open... FAILURE\n");
+    }
+    printk(KERN_INFO DEVICE_NAME ":     kernel opened\n");
+  }
   return 0;
 }
 
@@ -97,6 +137,37 @@ ssize_t device_write(struct file* filp, const char* userBuffer, size_t bufCount,
   // move data from the user space (process) to the kernel space (device).
   // copy_from_user(to,from,size)
   ret = copy_from_user(dum_dev.data,userBuffer,bufCount);
+  //arm_smccc_smc(write_opcode, 0, 0, 0, 0, 0, 0, 0, &res);
+  int i, blk_size=6,regs;
+  int num_calls=(bufCount-1)/blk_size+1;
+  int last_trim=(bufCount-1)%blk_size+1;
+  for(i=0, i<num_calls; ++i){
+    regs = i==num_calls-1? last_trim : blk_size;
+    printk(KERN_INFO DEVICE_NAME ":     call:\n");
+    printk(KERN_INFO DEVICE_NAME ":     arm_smccc_smc(OPTEE_SMC_OPEN_DUMMY,\n");
+    printk(KERN_INFO DEVICE_NAME ":       %ld,\n",dum_dev.data[blk_size*i+0]);
+    printk(KERN_INFO DEVICE_NAME ":       %ld,\n",dum_dev.data[blk_size*i+1]);
+    printk(KERN_INFO DEVICE_NAME ":       %ld,\n",dum_dev.data[blk_size*i+2]);
+    printk(KERN_INFO DEVICE_NAME ":       %ld,\n",dum_dev.data[blk_size*i+3]);
+    printk(KERN_INFO DEVICE_NAME ":       %ld,\n",dum_dev.data[blk_size*i+4]);
+    printk(KERN_INFO DEVICE_NAME ":       %ld,\n",dum_dev.data[blk_size*i+5]);
+    printk(KERN_INFO DEVICE_NAME ":     );\n");
+    /*
+    arm_smccc_smc(OPTEE_SMC_OPEN_DUMMY,
+		  regs,
+		  dum_dev.data[blk_size*i+0],
+		  dum_dev.data[blk_size*i+1],
+		  dum_dev.data[blk_size*i+2],
+		  dum_dev.data[blk_size*i+3],
+		  dum_dev.data[blk_size*i+4],
+		  dum_dev.data[blk_size*i+5],
+		  &res
+		  );
+    */
+  }
+
+
+    
   printk(KERN_INFO DEVICE_NAME ":     %ld chars written into device\n",bufCount);
   printk(KERN_INFO DEVICE_NAME ":     written\n");
   return ret;

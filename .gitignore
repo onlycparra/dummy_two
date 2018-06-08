@@ -16,5 +16,8 @@
 #binary of test app
 user_app/test
 
+#experiment folder
+experiment/
+
 #file to take note of the changes, it is copied into the commit message
 project_driver/changelog.md

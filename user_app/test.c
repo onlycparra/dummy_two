@@ -87,7 +87,8 @@ int main(){
       if(maped_mem != NULL){
 	printf("  data: ");
 	scanf("%[^\n]",buf);
-	strncpy(maped_mem,buf,sizeof(buf));
+	//strncpy(to,from,length);
+	strncpy(maped_mem,buf,strlen(buf));
       }else{
 	printf("  memory not mapped, mmap first\n");
       }
