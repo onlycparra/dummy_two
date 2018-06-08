@@ -53,12 +53,15 @@ int main(){
     if(!strcmp(option,"dw")){
       printf(RED "  Driver write\n" RES);
       printf("  data: ");
-      scanf("%[^\n]",buf); //store everything up to just before \n
-      write(fd,buf,sizeof(buf));
+      if(!scanf("%[^\n]",buf)){//store everything up to just before \n
+	printf("  No modification\n");
+      }else{
+	write(fd,buf,strlen(buf));
+      }
     }
     
     else if(!strcmp(option,"dr")){
-      read(fd,buf,sizeof(buf));
+      read(fd,buf,strlen(buf));
       printf(RED "  Driver read\n" RES);
       printf("  data: [" YEL "%s" RES "]\n",buf);
     }
@@ -118,7 +121,7 @@ int main(){
     }
     
     else{
-      printf(BRE "  incorrect option\n" RES);
+      printf(BRE "  %s is an incorrect option\n" RES, option);
     }
   }
   return 0;
