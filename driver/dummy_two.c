@@ -7,8 +7,8 @@
 #include <linux/slab.h>      //kmalloc, kfree
 #include <linux/mm.h>        //vm_area_struct, PAGE_SIZE
 #include <linux/ioctl.h>     //_IO, _IOR, _IOW
-#include <linux/arm-smccc.h>
-#include "chardev_smc.h"        //SMC call definition
+//#include <linux/arm-smccc.h>
+//#include "chardev_smc.h"        //SMC call definition
 
 //#include "../include/ioctl_commands.h" //DUMMY_SYNC
 
@@ -33,7 +33,7 @@ struct Dummy_device{
 
 
 //variables (declared here to not use the small available kernel stack).
-struct arm_smccc_res res;       //hold returned values from smc call
+//struct arm_smccc_res res;       //hold returned values from smc call
 struct Dummy_device dum_dev;
 struct cdev *my_char_dev; // struct that will allow us to register the char device.
 int major_number; // will hold the device major number.
@@ -100,30 +100,44 @@ int device_open_2(struct inode *inode, struct file *filp){
 
 
 int iterate_write(unsigned long* buffer, size_t bufCount){
-  int i, regs, num_calls, last_size;
+  unsigned long num_calls,last_size,data[7];
+  int i;
+  printk(KERN_INFO DEVICE_NAME ":     sof(char): %ld    sof(ul): %ld\n",sizeof(char),sizeof(unsigned long));
+  printk(KERN_INFO DEVICE_NAME ":     bufCount %ld\n",bufCount);
   //arm_smccc_smc(write_opcode, 0, 0, 0, 0, 0, 0, 0, &res);
   num_calls=(bufCount-1)/(8*BLK_SIZE)+1;
-  last_size=(bufCount-1)%BLK_SIZE+1;
+  last_size=(bufCount-1)%(8*BLK_SIZE)+1;
+  
   for(i=0; i<num_calls; ++i){
-    regs = i==num_calls-1? last_size : BLK_SIZE;
+    printk(KERN_INFO DEVICE_NAME ":     num_calls: %ld\n",num_calls);
+    printk(KERN_INFO DEVICE_NAME ":     last_size: %ld\n",last_size);
+    data[0] = (unsigned long) (i==num_calls-1) ? last_size : BLK_SIZE;
+    data[1] = data[0]-1>=0 ? buffer[BLK_SIZE*i+0] : 0;
+    data[2] = data[0]-2>=0 ? buffer[BLK_SIZE*i+1] : 0;
+    data[3] = data[0]-3>=0 ? buffer[BLK_SIZE*i+2] : 0;
+    data[4] = data[0]-4>=0 ? buffer[BLK_SIZE*i+3] : 0;
+    data[5] = data[0]-5>=0 ? buffer[BLK_SIZE*i+4] : 0;
+    data[6] = data[0]-6>=0 ? buffer[BLK_SIZE*i+5] : 0;
+    
     printk(KERN_INFO DEVICE_NAME ":     arm_smccc_smc(OPTEE_SMC_OPEN_DUMMY,\n");
-    printk(KERN_INFO DEVICE_NAME ":       %ld,\n",(unsigned long)regs);
-    printk(KERN_INFO DEVICE_NAME ":       %ld,\n",buffer[BLK_SIZE*i+0]);
-    printk(KERN_INFO DEVICE_NAME ":       %ld,\n",buffer[BLK_SIZE*i+1]);
-    printk(KERN_INFO DEVICE_NAME ":       %ld,\n",buffer[BLK_SIZE*i+2]);
-    printk(KERN_INFO DEVICE_NAME ":       %ld,\n",buffer[BLK_SIZE*i+3]);
-    printk(KERN_INFO DEVICE_NAME ":       %ld,\n",buffer[BLK_SIZE*i+4]);
-    printk(KERN_INFO DEVICE_NAME ":       %ld\n",buffer[BLK_SIZE*i+5]);
+    printk(KERN_INFO DEVICE_NAME ":       %ld,\n",data[0]);
+    printk(KERN_INFO DEVICE_NAME ":       %ld,\n",data[1]);
+    printk(KERN_INFO DEVICE_NAME ":       %ld,\n",data[2]);
+    printk(KERN_INFO DEVICE_NAME ":       %ld,\n",data[3]);
+    printk(KERN_INFO DEVICE_NAME ":       %ld,\n",data[4]);
+    printk(KERN_INFO DEVICE_NAME ":       %ld,\n",data[5]);
+    printk(KERN_INFO DEVICE_NAME ":       %ld,\n" ,data[6]);
+    printk(KERN_INFO DEVICE_NAME ":       &res\n");
     printk(KERN_INFO DEVICE_NAME ":     );\n");
     /*
     arm_smccc_smc(OPTEE_SMC_OPEN_DUMMY,
-		  regs,
-		  buffer[BLK_SIZE*i+0],
-		  buffer[BLK_SIZE*i+1],
-		  buffer[BLK_SIZE*i+2],
-		  buffer[BLK_SIZE*i+3],
-		  buffer[BLK_SIZE*i+4],
-		  buffer[BLK_SIZE*i+5],
+		  data[0],
+                  data[1],
+                  data[2],
+                  data[3],
+                  data[4],
+                  data[5],
+                  data[6],
 		  &res
 		  );
     if(res->a2!=OK){
@@ -210,7 +224,7 @@ ssize_t device_write(struct file* filp, const char* userBuffer, size_t bufCount,
   }
   
   // copy_from_user(to,from,size)
-  if(!copy_from_user(dum_dev.data,userBuffer,bufCount)){
+  if(copy_from_user(dum_dev.data,userBuffer,bufCount)){
     printk(KERN_INFO DEVICE_NAME ":     error in copy_from_user()\n");
     return -EACCES;
   }
@@ -272,11 +286,12 @@ long device_ioctl(struct file *filp, unsigned int cmd, unsigned long arg){
       kmem.size = dum_dev.size;
       printk(KERN_INFO DEVICE_NAME ":     data to write truncated to %ld\n",dum_dev.size);
     }
+    
     printk(KERN_INFO DEVICE_NAME ":     kmem.size: %ld\n",kmem.size);
     user_data = kmem.data;
     kmem.data=kmalloc(kmem.size,GFP_KERNEL);
     memset(kmem.data,0,kmem.size);
-    // copy_from_user(to,from,size)
+    
     if(copy_from_user(kmem.data,user_data,kmem.size)){
       printk(KERN_INFO DEVICE_NAME ":     error in copy_from_user(data)\n");
       return -EACCES;
