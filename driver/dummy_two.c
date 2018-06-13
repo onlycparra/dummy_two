@@ -1,3 +1,7 @@
+#define FOR_OPTEE 0  //for conditional compilation
+#define DEVICE_NAME "dummy_two"
+#define CALL_SIZE 2 //number of registers to read/write at the time
+
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/fs.h>        //struct file_operations
@@ -7,12 +11,14 @@
 #include <linux/slab.h>      //kmalloc, kfree
 #include <linux/mm.h>        //vm_area_struct, PAGE_SIZE
 #include <linux/ioctl.h>     //_IO, _IOR, _IOW
-//#include <linux/arm-smccc.h>
-//#include "chardev_smc.h"        //SMC call definition
+
+#if FOR_OPTEE
+#include <linux/arm-smccc.h>
+#include "chardev_smc.h"        //SMC call definition
+#endif
+
 
 //#include "../include/ioctl_commands.h" //DUMMY_SYNC
-
-
 //struct for ioctl queries
 struct io_t{
   unsigned long* data;
@@ -33,14 +39,13 @@ struct Dummy_device{
 
 
 //variables (declared here to not use the small available kernel stack).
-//struct arm_smccc_res res;       //hold returned values from smc call
+#if FOR_OPTEE
+struct arm_smccc_res res;       //hold returned values from smc call
+#endif
 struct Dummy_device dum_dev;
 struct cdev *my_char_dev; // struct that will allow us to register the char device.
-int major_number; // will hold the device major number.
-int ret; // used for returns.
+int major_number, ret; // will hold the device major number. used for returns.
 dev_t dev_num; // stuct that stores the device number given by the OS.
-#define DEVICE_NAME "dummy_two"
-#define BLK_SIZE 6 //number of registers to read/write at the time
 
 int device_open(struct inode *inode, struct file *filp);
 ssize_t device_read(struct file* filp, char* userBuffer, size_t bufCount, loff_t* curOffset);
@@ -65,142 +70,96 @@ struct file_operations fops = {
 //////////////////////////////////////////////////////////////
 ////////////////////// DEFINITIONS ///////////////////////////
 //////////////////////////////////////////////////////////////
-
-/*
-int device_open_2(struct inode *inode, struct file *filp){
+int device_open(struct inode *inode, struct file *filp){
   printk(KERN_WARNING DEVICE_NAME ": [opening]\n");
   ret = down_interruptible(&dum_dev.sem);
   if(ret != 0){
     printk(KERN_ALERT DEVICE_NAME ":     could not lock device during open\n");
     return ret;
   }
-
+#if FOR_OPTEE
   arm_smccc_smc(OPTEE_SMC_OPEN_DUMMY, 0, 0, 0, 0, 0, 0, 0, &res);
-  if(res.a0 == OPTEE_SMC_RETURN_OK){
-    printk(KERN_INFO "DUMMY DRV: device_open ... SUCCESS\n");
-    if(res.a1 == OPTEE_SMC_OPEN_DUMMY_SUCCESS) {
-      printk(KERN_INFO "DUMMY DRV: device_open ... called smc call :");
-      dum_dev.data = (unsigned long*) get_zeroed_page(GFP_KERNEL);
-      if(dum_dev.data == NULL){
-	printk(KERN_ALERT DEVICE_NAME ":     could not allocate memory\n");
-	return -1;
-      }
-      dum_dev.size=PAGE_SIZE;
-
-    }
-    else
-      printk(KERN_INFO "DUMMY DRV: device_open ... called smc call :");
-  }
-
-  printk(KERN_INFO DEVICE_NAME ":     opened\n");
-  return 0;
-}
-*/
-
-
-
-int iterate_write(unsigned long* buffer, size_t bufCount){
-  unsigned long num_calls,last_size,data[7];
-  int i;
-  printk(KERN_INFO DEVICE_NAME ":     sof(char): %ld    sof(ul): %ld\n",sizeof(char),sizeof(unsigned long));
-  printk(KERN_INFO DEVICE_NAME ":     bufCount %ld\n",bufCount);
-  //arm_smccc_smc(write_opcode, 0, 0, 0, 0, 0, 0, 0, &res);
-  num_calls=(bufCount-1)/(8*BLK_SIZE)+1;
-  last_size=(bufCount-1)%(8*BLK_SIZE)+1;
-  
-  for(i=0; i<num_calls; ++i){
-    printk(KERN_INFO DEVICE_NAME ":     num_calls: %ld\n",num_calls);
-    printk(KERN_INFO DEVICE_NAME ":     last_size: %ld\n",last_size);
-    data[0] = (unsigned long) (i==num_calls-1) ? last_size : BLK_SIZE;
-    data[1] = data[0]-1>=0 ? buffer[BLK_SIZE*i+0] : 0;
-    data[2] = data[0]-2>=0 ? buffer[BLK_SIZE*i+1] : 0;
-    data[3] = data[0]-3>=0 ? buffer[BLK_SIZE*i+2] : 0;
-    data[4] = data[0]-4>=0 ? buffer[BLK_SIZE*i+3] : 0;
-    data[5] = data[0]-5>=0 ? buffer[BLK_SIZE*i+4] : 0;
-    data[6] = data[0]-6>=0 ? buffer[BLK_SIZE*i+5] : 0;
-    
-    printk(KERN_INFO DEVICE_NAME ":     arm_smccc_smc(OPTEE_SMC_OPEN_DUMMY,\n");
-    printk(KERN_INFO DEVICE_NAME ":       %ld,\n",data[0]);
-    printk(KERN_INFO DEVICE_NAME ":       %ld,\n",data[1]);
-    printk(KERN_INFO DEVICE_NAME ":       %ld,\n",data[2]);
-    printk(KERN_INFO DEVICE_NAME ":       %ld,\n",data[3]);
-    printk(KERN_INFO DEVICE_NAME ":       %ld,\n",data[4]);
-    printk(KERN_INFO DEVICE_NAME ":       %ld,\n",data[5]);
-    printk(KERN_INFO DEVICE_NAME ":       %ld,\n" ,data[6]);
-    printk(KERN_INFO DEVICE_NAME ":       &res\n");
-    printk(KERN_INFO DEVICE_NAME ":     );\n");
-    /*
-    arm_smccc_smc(OPTEE_SMC_OPEN_DUMMY,
-		  data[0],
-                  data[1],
-                  data[2],
-                  data[3],
-                  data[4],
-                  data[5],
-                  data[6],
-		  &res
-		  );
-    if(res->a2!=OK){
-      return -1;
-    }
-    */
-  }
-  return 0;
-}
-
-
-int device_open(struct inode *inode, struct file *filp){
-  printk(KERN_WARNING DEVICE_NAME ": [opening]\n");
-  if(down_interruptible(&dum_dev.sem)){
-    printk(KERN_ALERT DEVICE_NAME ":     could not lock device during open\n");
-    return ret;
-  }
-
-  //allocate page
-  dum_dev.size=0;
-  //dum_dev.data = (char*) kmalloc(size in bytes,GFP_KERNEL); //may give memory not page-aligned
-  dum_dev.data = (unsigned long*) get_zeroed_page(GFP_KERNEL);
-  
-  if(!dum_dev.data){
-    printk(KERN_ALERT DEVICE_NAME ":     kernel could not allocate memory\n");
+  if(res.a0 != OPTEE_SMC_RETURN_OK){
+    printk(KERN_INFO DEVICE_NAME ":     OPTEE_SMC_RETURN: failure\n");
     return -1;
   }
-  
+  printk(KERN_INFO DEVICE_NAME ":     OPTEE_SMC_RETURN: ok\n");
+  if(res.a1 != OPTEE_SMC_OPEN_DUMMY_SUCCESS){
+    printk(KERN_INFO DEVICE_NAME ":     OPTEE_SMC_OPEN_DUMMY: failure\n");
+    return -1;
+  }
+#endif
+  dum_dev.size=0;
+  dum_dev.data = (unsigned long*) get_zeroed_page(GFP_KERNEL);
+  if(!dum_dev.data){
+    printk(KERN_ALERT DEVICE_NAME ":     could not allocate page\n");
+    return -1;
+  }
   dum_dev.size=PAGE_SIZE;
-  printk(KERN_INFO DEVICE_NAME ":     kernel allocated %ld bytes for the device\n", dum_dev.size);
+  printk(KERN_INFO DEVICE_NAME ":     kernel %ld bytes allocated for the device\n", dum_dev.size);
   printk(KERN_INFO DEVICE_NAME ":     kernel opened\n");
   return 0;
 }
 
-/*
-int device_open(struct inode *inode, struct file *filp){
-  printk(KERN_WARNING DEVICE_NAME ": [opening]\n");
-  ret = down_interruptible(&dum_dev.sem);
-  if(ret != 0){
-    printk(KERN_ALERT DEVICE_NAME ":     could not lock device during open\n");
-    return ret;
-  }
-  arm_smccc_smc(OPTEE_SMC_OPEN_DUMMY, 0, 0, 0, 0, 0, 0, 0, &res);
-  if(res.a0 == OPTEE_SMC_RETURN_OK){
-    printk(KERN_INFO DEVICE_NAME ":     smc call... SUCCESS\n");
-    if(res.a1 == OPTEE_SMC_OPEN_DUMMY_SUCCESS) {
-      printk(KERN_INFO DEVICE_NAME ":     secure_device_open... SUCCESS\n");
-      dum_dev.data = (unsigned long*) get_zeroed_page(GFP_KERNEL);
-      dum_dev.size = 0;
-      if(!dum_dev.data){
-	printk(KERN_ALERT DEVICE_NAME ":     kernel could not allocate memory\n");
-	return -1;
+
+int __low_write(struct io_t *mem){
+  int sul = sizeof(unsigned long);
+  char args[sul*CALL_SIZE];
+  int i,j,k,index = 0;
+  unsigned long size_l = mem->size%sul == 0 ? mem->size/sul : mem->size/sul+1;
+  unsigned long calls  = size_l%CALL_SIZE==0 ? size_l/CALL_SIZE : size_l/CALL_SIZE+1;
+  printk(KERN_INFO DEVICE_NAME ":     call size: %d\n",CALL_SIZE);
+  printk(KERN_INFO DEVICE_NAME ":     chars    : %ld\n",mem->size);
+  printk(KERN_INFO DEVICE_NAME ":     uns longs: %ld\n",size_l);
+  printk(KERN_INFO DEVICE_NAME ":     calls    : %ld\n", calls);
+  for(i=0; i<calls; ++i){
+    for(j=0; j<CALL_SIZE; ++j){
+      for(k=0; k<sul; ++k){
+	index = j*sul+k;
+        args[index] = i*CALL_SIZE*sul+index<mem->size ?
+	  (char) ((char*)(mem->data)) [i*CALL_SIZE*sul+index] :
+	  0;
+	//printk(KERN_INFO DEVICE_NAME ":     args[%2d] = mem->data[%2d] = %c\n", index, i*CALL_SIZE+index, args[index]);
       }
-      dum_dev.size=PAGE_SIZE;
-      printk(KERN_INFO DEVICE_NAME ":     kernel %ld bytes allocated for the device\n", dum_dev.size);
-    }else{
-      printk(KERN_INFO DEVICE_NAME ":     secure_device_open... FAILURE\n");
     }
-    printk(KERN_INFO DEVICE_NAME ":     kernel opened\n");
+
+#if FOR_OPTEE
+    /*
+    arm_smccc_smc(
+      OPTEE_SMC_WRITE_DUMMY,
+      args[0],
+      args[1],
+      args[2],
+      args[3],
+      args[4],
+      args[5],
+      args[6],
+      &res
+    );
+    if(res->a2!=OK){
+      return -1;
+    }
+    */
+#else
+    printk(KERN_INFO DEVICE_NAME ":     arm_smccc_smc(OPTEE_SMC_WRITE_DUMMY,\n");
+    for(j=0; j<CALL_SIZE; ++j){
+      for(k=0; k<sul; ++k){
+	if(args[j*8+k]!=0){
+	  printk(KERN_INFO DEVICE_NAME ":       %c\n",args[j*8+k]);
+	}else{
+	  printk(KERN_INFO DEVICE_NAME ":       Ø\n");
+	}
+      }
+      printk(KERN_INFO DEVICE_NAME ":        \n");
+    }
+    printk(KERN_INFO DEVICE_NAME ":       &res\n");
+    printk(KERN_INFO DEVICE_NAME ":     );\n");
+#endif
   }
   return 0;
 }
-*/
+
+
 ssize_t device_read(struct file* filp, char* userBuffer, size_t bufCount, loff_t* curOffset){
   printk(KERN_WARNING DEVICE_NAME ": [reading]\n");
   if(bufCount > dum_dev.size){
@@ -211,30 +170,36 @@ ssize_t device_read(struct file* filp, char* userBuffer, size_t bufCount, loff_t
   // move data from kernel space (device) to user space (process).
   // copy_to_user(to,from,size)
   printk(KERN_INFO DEVICE_NAME ":     reading %ld chars from device\n",bufCount);
-  ret = copy_to_user(userBuffer,dum_dev.data,bufCount);
+  if(copy_to_user(userBuffer,dum_dev.data,bufCount)){
+    printk(KERN_INFO DEVICE_NAME ":     error in copy_to_user\n");
+      return -EACCES;
+    }
   printk(KERN_INFO DEVICE_NAME ":     read\n");
   return ret;
 }
 
 ssize_t device_write(struct file* filp, const char* userBuffer, size_t bufCount, loff_t* curOffset){
+  struct io_t mem;
   printk(KERN_WARNING DEVICE_NAME ": [writing]\n");
-  if(bufCount > dum_dev.size){
-    bufCount = dum_dev.size;
+  mem.size = bufCount;
+  if(mem.size > dum_dev.size){
+    mem.size = dum_dev.size;
     printk(KERN_INFO DEVICE_NAME ":     data to write truncated to %ld\n",dum_dev.size);
   }
-  
+  mem.data = kmalloc(mem.size,GFP_KERNEL);
+  memset(mem.data,0,mem.size);
   // copy_from_user(to,from,size)
-  if(copy_from_user(dum_dev.data,userBuffer,bufCount)){
+  if(copy_from_user(mem.data,userBuffer,mem.size)){
     printk(KERN_INFO DEVICE_NAME ":     error in copy_from_user()\n");
     return -EACCES;
   }
 
-  if(iterate_write(dum_dev.data, bufCount)){
-    printk(KERN_INFO DEVICE_NAME ":     error in iterate_write()\n");
-    return -EACCES;
+  if(__low_write(&mem)){
+    printk(KERN_INFO DEVICE_NAME ":     error in __low_write()\n");
+    return -1;
   }
   
-  printk(KERN_INFO DEVICE_NAME ":     %ld chars written into device\n",bufCount);
+  printk(KERN_INFO DEVICE_NAME ":     %ld chars written into device\n",mem.size);
   printk(KERN_INFO DEVICE_NAME ":     written\n");
   return 0;
 }
@@ -246,15 +211,15 @@ int device_mmap(struct file *filp, struct vm_area_struct *vma){
   /**
    * remap_pfn_range - remap kernel memory to userspace
    * int remap_pfn_range(struct vm_area_struct* vma, // user vma to map to 
-                         unsigned long addr,         \ target user address to start at
-   *                     unsigned long pfn,          \ physical address of kernel memory
-                         unsigned long size,         \ size of map area
-                         pgprot_t prot);             \ page protection flags for this mapping
+                         unsigned long addr,         // target user address to start at
+   *                     unsigned long pfn,          // physical address of kernel memory
+                         unsigned long size,         // size of map area
+                         pgprot_t prot);             // page protection flags for this mapping
    *  Note: this is only safe if the mm semaphore is held when called.
    */
   if(remap_pfn_range(vma,
 		     vma->vm_start,
-		     __pa(dum_dev.data)>>PAGE_SHIFT, //physical address of data, shifted. to get physical page number
+		     __pa(dum_dev.data)>>PAGE_SHIFT, //physical address of data. shifted to get physical page number
 		     PAGE_SIZE,
 		     vma->vm_page_prot))
     return -EAGAIN;
@@ -264,8 +229,8 @@ int device_mmap(struct file *filp, struct vm_area_struct *vma){
 }
 
 long device_ioctl(struct file *filp, unsigned int cmd, unsigned long arg){
-  struct io_t kmem;
-  unsigned long* user_data;
+  struct io_t mem;
+  unsigned long* udata; //user space pointer to data
   printk(KERN_WARNING DEVICE_NAME ": [ioctl-ing]\n");
   switch(cmd){
 
@@ -277,29 +242,28 @@ long device_ioctl(struct file *filp, unsigned int cmd, unsigned long arg){
 
   case DUMMY_WRITE:
     printk(KERN_INFO DEVICE_NAME ":     command DUMMY_WRITE\n");
-    if(copy_from_user(&kmem,(struct io_t*)arg, sizeof(struct io_t))){
+    if(copy_from_user(&mem,(struct io_t*)arg, sizeof(struct io_t))){
       printk(KERN_INFO DEVICE_NAME ":     error in copy_from_user(struct)\n");
       return -EACCES;
     }
 
-    if(kmem.size > dum_dev.size){
-      kmem.size = dum_dev.size;
+    if(mem.size > dum_dev.size){
+      mem.size = dum_dev.size;
       printk(KERN_INFO DEVICE_NAME ":     data to write truncated to %ld\n",dum_dev.size);
     }
+
+    udata = mem.data;
+    mem.data = kmalloc(mem.size,GFP_KERNEL);
+    memset(mem.data,0,mem.size);
     
-    printk(KERN_INFO DEVICE_NAME ":     kmem.size: %ld\n",kmem.size);
-    user_data = kmem.data;
-    kmem.data=kmalloc(kmem.size,GFP_KERNEL);
-    memset(kmem.data,0,kmem.size);
-    
-    if(copy_from_user(kmem.data,user_data,kmem.size)){
+    if(copy_from_user(mem.data,udata,mem.size)){
       printk(KERN_INFO DEVICE_NAME ":     error in copy_from_user(data)\n");
       return -EACCES;
     }
 
-    if(iterate_write(kmem.data, kmem.size)){
-      printk(KERN_INFO DEVICE_NAME ":     error in iterate_write()\n");
-      return -EACCES;
+    if(__low_write(&mem)){
+      printk(KERN_INFO DEVICE_NAME ":     error in __low_write()\n");
+      return -1;
     }
     break;
 
