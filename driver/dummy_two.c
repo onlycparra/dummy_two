@@ -1,6 +1,6 @@
-#define FOR_OPTEE 0  //for conditional compilation
+#define FOR_OPTEE 1  //for conditional compilation
 #define DEVICE_NAME "dummy_two"
-#define CALL_SIZE 2 //number of registers to read/write at the time
+#define CALL_SIZE 4 //number of registers to read/write at the time
 
 #include <linux/module.h>
 #include <linux/kernel.h>
