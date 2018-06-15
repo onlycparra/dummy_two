@@ -9,14 +9,14 @@
 //#include "../include/ioctl_commands.h" //DUMMY_SYNC
 
 //struct for ioctl queries
-struct io_t{
+struct mem_t{
   unsigned long* data;
   unsigned long size;
 };
 
 #define DUMMY_SYNC   _IO('q', 1001)
-#define DUMMY_WRITE _IOW('q', 1002, struct io_t*)
-#define DUMMY_READ  _IOW('q', 1003, struct io_t*)
+#define DUMMY_WRITE _IOW('q', 1002, struct mem_t*)
+#define DUMMY_READ  _IOW('q', 1003, struct mem_t*)
 
 //colors
 #define RES   "\033[0m"
@@ -127,9 +127,10 @@ int main(){
     }
 
     else if(!strcmp(option,"iw")){
-      struct io_t umem;
+      struct mem_t umem;
       printf(MAG "  ioctl write\n" RES);
       printf("  data: ");
+      umem.data = malloc(page_size);
       if(!scanf("%[^\n]",(char*)umem.data)){//store everything up to just before \n
 	printf("  No modification\n");
       }else{
@@ -143,8 +144,11 @@ int main(){
     }
 
     else if(!strcmp(option,"ir")){
-      printf(MAG "  ioctl read (not implemented)\n" RES);
-      if(!ioctl(fd,DUMMY_READ,0)){
+      struct mem_t umem;
+      umem.size=0;
+      umem.data = malloc(page_size);
+      printf(MAG "  ioctl read\n" RES);
+      if(!ioctl(fd,DUMMY_READ,&umem)){
 	printf("  successful\n");
       }else{
 	printf(BRE "  fail\n" RES);
