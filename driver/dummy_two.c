@@ -1,6 +1,7 @@
 #define FOR_OPTEE 0  //for conditional compilation
 #define DEVICE_NAME "dummy_two"
-#define CALL_SIZE 2 //number of registers to read/write at the time
+#define R_REGS 3 //registers availables to read in one smc read
+#define W_REGS 3 //registers availables to write in one smc write
 
 #include <linux/module.h>
 #include <linux/kernel.h>
@@ -20,14 +21,14 @@
 
 //#include "../include/ioctl_commands.h" //DUMMY_SYNC
 //struct for ioctl queries
-struct io_t{
+struct mem_t{
   unsigned long* data;
   unsigned long size;
 };
 
 #define DUMMY_SYNC _IO('q', 1001)
-#define DUMMY_WRITE _IOW('q', 1002, struct io_t*)
-#define DUMMY_READ  _IOW('q', 1003, struct io_t*)
+#define DUMMY_WRITE _IOW('q', 1002, struct mem_t*)
+#define DUMMY_READ  _IOW('q', 1003, struct mem_t*)
 
 
 //struct for device
@@ -102,47 +103,57 @@ int device_open(struct inode *inode, struct file *filp){
 }
 
 
-int __low_write(struct io_t *mem){
+int __low_write(struct mem_t *mem){
   int sul = sizeof(unsigned long);
-  char args[sul*CALL_SIZE];
+  char args[sul*W_REGS];
   int i,j,k,index = 0;
-  unsigned long size_l = mem->size%sul == 0 ? mem->size/sul : mem->size/sul+1;
-  unsigned long calls  = size_l%CALL_SIZE==0 ? size_l/CALL_SIZE : size_l/CALL_SIZE+1;
-  printk(KERN_INFO DEVICE_NAME ":     call size: %d\n",CALL_SIZE);
+  
+  //reset cursor
+  arm_smccc_smc(OPTEE_SMC_RESET_DUMMY,WRITE_CURSOR,0,0,&res);
+  
+  //unsigned longs (ulongs) are the mean of transportation:
+  //how many ulongs do we need to move the data?
+  unsigned long ulongs = mem->size%sul == 0 ? mem->size/sul : mem->size/sul+1;
+  
+  //how many calls do we need for that number of ulongs
+  unsigned long calls  = ulongs%W_REGS==0 ? ulongs/W_REGS : ulongs/W_REGS+1;
+
+  printk(KERN_INFO DEVICE_NAME ":     wr calls : %ld\n", calls);
+  printk(KERN_INFO DEVICE_NAME ":     call size: %d\n",W_REGS);
   printk(KERN_INFO DEVICE_NAME ":     chars    : %ld\n",mem->size);
-  printk(KERN_INFO DEVICE_NAME ":     uns longs: %ld\n",size_l);
-  printk(KERN_INFO DEVICE_NAME ":     calls    : %ld\n", calls);
-  for(i=0; i<calls; ++i){
-    for(j=0; j<CALL_SIZE; ++j){
-      for(k=0; k<sul; ++k){
+  printk(KERN_INFO DEVICE_NAME ":     ulongs   : %ld\n",ulongs);
+
+  
+  for(i=0; i<calls; ++i){    //for each call
+    for(j=0; j<W_REGS; ++j){ //for each long
+      for(k=0; k<sul; ++k){  //for each char
 	index = j*sul+k;
-        args[index] = i*CALL_SIZE*sul+index<mem->size ?
-	  (char) ((char*)(mem->data)) [i*CALL_SIZE*sul+index] :
-	  0;
-	//printk(KERN_INFO DEVICE_NAME ":     args[%2d] = mem->data[%2d] = %c\n", index, i*CALL_SIZE+index, args[index]);
+	if(i*W_REGS*sul+index<mem->size){
+	  args[index] = (char) ((char*)(mem->data)) [i*W_REGS*sul+index];
+	}else{
+	  args[index] = 0;
+	}
+	//printk(KERN_INFO DEVICE_NAME ":     args[%2d] = mem->data[%2d] = %c\n", index, i*W_REGS+index, args[index]);
       }
     }
 
 #if FOR_OPTEE
-    /*
-    arm_smccc_smc(
-      OPTEE_SMC_WRITE_DUMMY,
-      args[0],
-      args[1],
-      args[2],
-      args[3],
-      args[4],
-      args[5],
-      args[6],
-      &res
-    );
+
+    //data (and maybe some zeroes) write
+    arm_smccc_smc(OPTEE_SMC_WRITE_DUMMY,
+		  ((unsiged long*)args)[0],
+		  ((unsiged long*)args)[1],
+		  ((unsiged long*)args)[2],
+		  &res);
+    //SILLY CORRECTNESS CHECK
     if(res->a2!=OK){
+      printk(KERN_INFO DEVICE_NAME ":     arm_smccc_smc(write,data,...) failed\n");
       return -1;
     }
-    */
+
 #else
-    printk(KERN_INFO DEVICE_NAME ":     arm_smccc_smc(OPTEE_SMC_WRITE_DUMMY,\n");
-    for(j=0; j<CALL_SIZE; ++j){
+    printk(KERN_INFO DEVICE_NAME ":     smc(SMC_WRITE,\n");
+    for(j=0; j<W_REGS; ++j){
       for(k=0; k<sul; ++k){
 	if(args[j*8+k]!=0){
 	  printk(KERN_INFO DEVICE_NAME ":       %c\n",args[j*8+k]);
@@ -154,23 +165,92 @@ int __low_write(struct io_t *mem){
     }
     printk(KERN_INFO DEVICE_NAME ":       &res\n");
     printk(KERN_INFO DEVICE_NAME ":     );\n");
+
 #endif
   }
+  
+#if FOR_OPTEE
+  //last pure zero write
+  arm_smccc_smc(OPTEE_SMC_WRITE_DUMMY,0,0,0,&res);
+  //SILLY CORRECTNESS CHECK
+  if(res->a2!=OK){
+    printk(KERN_INFO DEVICE_NAME ":     arm_smccc_smc(write,0,0,...) failed\n");
+    return -1;
+  }
+#endif
   return 0;
 }
 
 
+int __low_read(struct mem_t *mem){
+  int sul = sizeof(unsigned long);
+  char buffer[sul*R_REGS]; //buffer for one call
+  int i,j,k,index = 0;
+  mem->size=0;
+  printk(KERN_WARNING DEVICE_NAME ":         [low_read]\n");
+  
+  //reset cursor
+  arm_smccc_smc(OPTEE_SMC_RESET_DUMMY,READ_CURSOR,0,0,&res);
+  //SILLY CORRECTNESS CHECK
+  if(res->a2!=OK){
+    printk(KERN_INFO DEVICE_NAME ":         arm_smccc_smc(write,0,0,...) failed\n");
+    return -1;
+  }
+
+  //unsigned longs (ulongs) are the mean of transportation,
+  //how many ulongs can we possiblly need in the worst case?
+  unsigned long max_ulongs = PAGE_SIZE/sul;
+  
+  //how many calls could we possible need we need for that number of ulongs
+  unsigned long max_calls  = max_ulongs/R_REGS;
+
+  
+  for(i=0; i<calls; ++i){    //for each call
+    arm_smccc_smc(OPTEE_SMC_READ_DUMMY,0,0,0,&res);
+    if(res->a0 != SUCCESS){
+      printk(KERN_INFO DEVICE_NAME ":         arm_smccc_smc(read,...) failed\n");
+      return -1;
+    }
+    
+    //copy the results into buffer array (everything)
+    for(k=0; k<sul; ++k){
+      buffer[k]        = ((char*) &(res->a1))[k];
+      buffer[sul+k]    = ((char*) &(res->a2))[k];
+      buffer[2*sul+k]  = ((char*) &(res->a3))[k];
+    }
+
+    // pass one char at the time to mem->data and increment mem->size,
+    // if that char is 0, then exit all the loops.
+    for(k=0; k<sul*R_REGS; ++k){
+      ((char*)(mem->data))[i*sul*R_REGS+k] = buffer[k];
+      mem->size += 1;
+      if(!buffer[k]){
+	printk(KERN_WARNING DEVICE_NAME ":         low_read\n");
+	return 0;
+      }
+    }
+  }
+  return 0;
+}
+
 ssize_t device_read(struct file* filp, char* userBuffer, size_t bufCount, loff_t* curOffset){
+  struct mem_t mem;
+  
   printk(KERN_WARNING DEVICE_NAME ": [reading]\n");
   if(bufCount > dum_dev.size){
     bufCount = dum_dev.size;
     printk(KERN_INFO DEVICE_NAME ":     data read truncated to %ld\n",dum_dev.size);
   }
-  
+  mem.data = kmalloc(PAGE_SIZE,GFP_KERNEL);
+  mem.size = 0;
   // move data from kernel space (device) to user space (process).
   // copy_to_user(to,from,size)
-  printk(KERN_INFO DEVICE_NAME ":     reading %ld chars from device\n",bufCount);
-  if(copy_to_user(userBuffer,dum_dev.data,bufCount)){
+  
+  printk(KERN_INFO DEVICE_NAME ":     reading available chars from device\n");
+
+  __low_read(&mem);
+  
+  if(copy_to_user(userBuffer, mem.data, mem.size)){
     printk(KERN_INFO DEVICE_NAME ":     error in copy_to_user\n");
       return -EACCES;
     }
@@ -179,7 +259,7 @@ ssize_t device_read(struct file* filp, char* userBuffer, size_t bufCount, loff_t
 }
 
 ssize_t device_write(struct file* filp, const char* userBuffer, size_t bufCount, loff_t* curOffset){
-  struct io_t mem;
+  struct mem_t mem;
   printk(KERN_WARNING DEVICE_NAME ": [writing]\n");
   mem.size = bufCount;
   if(mem.size > dum_dev.size){
@@ -229,7 +309,7 @@ int device_mmap(struct file *filp, struct vm_area_struct *vma){
 }
 
 long device_ioctl(struct file *filp, unsigned int cmd, unsigned long arg){
-  struct io_t mem;
+  struct mem_t mem;
   unsigned long* udata; //user space pointer to data
   printk(KERN_WARNING DEVICE_NAME ": [ioctl-ing]\n");
   switch(cmd){
@@ -242,7 +322,7 @@ long device_ioctl(struct file *filp, unsigned int cmd, unsigned long arg){
 
   case DUMMY_WRITE:
     printk(KERN_INFO DEVICE_NAME ":     command DUMMY_WRITE\n");
-    if(copy_from_user(&mem,(struct io_t*)arg, sizeof(struct io_t))){
+    if(copy_from_user(&mem,(struct mem_t*)arg, sizeof(struct mem_t))){
       printk(KERN_INFO DEVICE_NAME ":     error in copy_from_user(struct)\n");
       return -EACCES;
     }
@@ -269,6 +349,19 @@ long device_ioctl(struct file *filp, unsigned int cmd, unsigned long arg){
 
   case DUMMY_READ:
     printk(KERN_INFO DEVICE_NAME ":     command DUMMY_READ\n");
+    if(copy_from_user(&mem,(struct mem_t*)arg, sizeof(struct mem_t))){
+      printk(KERN_INFO DEVICE_NAME ":     error in copy_from_user(struct)\n");
+      return -EACCES;
+    }
+
+    mem.size = 0;
+    mem.data = kmalloc(PAGE_SIZE,GFP_KERNEL);
+    memset(mem.data,0,PAGE_SIZE);
+
+    if(__low_read(&mem)){
+      printk(KERN_INFO DEVICE_NAME ":     error in __low_read()\n");
+      return -1;
+    }
     break;
 
 
