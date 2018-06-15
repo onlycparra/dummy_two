@@ -1,7 +1,7 @@
 #define FOR_OPTEE 0  //for conditional compilation
 #define DEVICE_NAME "dummy_two"
 #define R_REGS 3 //registers availables to read in one smc read
-#define W_REGS 3 //registers availables to write in one smc write
+#define W_REGS 4 //registers availables to write in one smc write
 
 #include <linux/module.h>
 #include <linux/kernel.h>
@@ -138,19 +138,20 @@ int __low_write(struct mem_t *mem){
     }
 
 #if FOR_OPTEE
+    printk(KERN_INFO DEVICE_NAME ":     arm_smccc_smc(OPTEE_SMC_WRITE_DUMMY,\n");
 
-    //data (and maybe some zeroes) write
-    arm_smccc_smc(OPTEE_SMC_WRITE_DUMMY,
-		  ((unsiged long*)args)[0],
-		  ((unsiged long*)args)[1],
-		  ((unsiged long*)args)[2],
-		  &res);
-    //SILLY CORRECTNESS CHECK
-    if(res->a2!=OK){
-      printk(KERN_INFO DEVICE_NAME ":     arm_smccc_smc(write,data,...) failed\n");
-      return -1;
+    arm_smccc_smc(OPTEE_SMC_WRITE_DUMMY, ((unsigned long*)args)[0], ((unsigned long*)args)[1], ((unsigned long*)args)[2], ((unsigned long*)args)[3], 0, 0, 0, &res);
+    if(res.a0 != OPTEE_SMC_RETURN_OK){
+        printk(KERN_INFO DEVICE_NAME ":     OPTEE_SMC_WRITE_DUMMY: SMC failure\n");
+        return -1;
+    }else{
+	printk(KERN_INFO DEVICE_NAME ":     OPTEE_SMC_WRITE_DUMMY OK\n");
     }
 
+    if(res.a1 != OPTEE_SMC_OPEN_DUMMY_SUCCESS){
+        printk(KERN_INFO DEVICE_NAME ":     OPTEE_SMC_WRITE_DUMMY: failure - writing thread\n");
+        return -1;
+    } 
 #else
     printk(KERN_INFO DEVICE_NAME ":     smc(SMC_WRITE,\n");
     for(j=0; j<W_REGS; ++j){
@@ -165,22 +166,19 @@ int __low_write(struct mem_t *mem){
     }
     printk(KERN_INFO DEVICE_NAME ":       &res\n");
     printk(KERN_INFO DEVICE_NAME ":     );\n");
-
 #endif
   }
-  
+
 #if FOR_OPTEE
   //last pure zero write
-  arm_smccc_smc(OPTEE_SMC_WRITE_DUMMY,0,0,0,&res);
-  //SILLY CORRECTNESS CHECK
-  if(res->a2!=OK){
-    printk(KERN_INFO DEVICE_NAME ":     arm_smccc_smc(write,0,0,...) failed\n");
-    return -1;
-  }
+  arm_smccc_smc(OPTEE_SMC_WRITE_DUMMY, 0, 0, 0, 0, 0, 0, 0, &res);
+    if(res.a0 != OPTEE_SMC_RETURN_OK){
+        printk(KERN_INFO DEVICE_NAME ":     OPTEE_SMC_WRITE_DUMMY: (zeroes) SMC failure\n");
+        return -1;
+   }
 #endif
-  return 0;
+   return 0;
 }
-
 
 int __low_read(struct mem_t *mem){
   int sul = sizeof(unsigned long);
@@ -243,17 +241,18 @@ ssize_t device_read(struct file* filp, char* userBuffer, size_t bufCount, loff_t
   }
   mem.data = kmalloc(PAGE_SIZE,GFP_KERNEL);
   mem.size = 0;
-  // move data from kernel space (device) to user space (process).
-  // copy_to_user(to,from,size)
+  
   
   printk(KERN_INFO DEVICE_NAME ":     reading available chars from device\n");
 
   __low_read(&mem);
-  
+
+  // move data from kernel space (device) to user space (process).
+  // copy_to_user(to,from,size)
   if(copy_to_user(userBuffer, mem.data, mem.size)){
     printk(KERN_INFO DEVICE_NAME ":     error in copy_to_user\n");
       return -EACCES;
-    }
+  }
   printk(KERN_INFO DEVICE_NAME ":     read\n");
   return ret;
 }
