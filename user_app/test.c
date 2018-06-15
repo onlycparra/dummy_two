@@ -149,7 +149,7 @@ int main(){
       umem.data = malloc(page_size);
       printf(MAG "  ioctl read\n" RES);
       if(!ioctl(fd,DUMMY_READ,&umem)){
-	printf("  successful\n");
+	printf("  data: [" YEL "%s" RES "]\n",buf);
       }else{
 	printf(BRE "  fail\n" RES);
       }
