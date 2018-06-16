@@ -1,4 +1,4 @@
-#define FOR_OPTEE 1  //for conditional compilation
+#define FOR_OPTEE 0  //for conditional compilation
 #define DEVICE_NAME "dummy_two"
 #define R_REGS 3 //registers availables to read in one smc read
 #define W_REGS 4 //registers availables to write in one smc write
@@ -108,6 +108,18 @@ int __low_write(struct mem_t *mem){
   int sul = sizeof(unsigned long);
   char args[sul*W_REGS];
   int i,j,k,index = 0;
+<<<<<<< HEAD
+  
+  //reset cursor
+  arm_smccc_smc(OPTEE_SMC_RESET_DUMMY,WRITE_CURSOR,0,0,&res);
+  
+  //unsigned longs (ulongs) are the mean of transportation:
+  //how many ulongs do we need to move the data?
+  unsigned long ulongs = mem->size%sul == 0 ? mem->size/sul : mem->size/sul+1;
+  
+  //how many calls do we need for that number of ulongs
+  unsigned long calls  = ulongs%W_REGS==0 ? ulongs/W_REGS : ulongs/W_REGS+1;
+=======
   //unsigned longs (ulongs) are the mean of transportation:
   //how many ulongs do we need to move the data?
   unsigned long ulongs = mem->size%sul == 0 ? mem->size/sul : mem->size/sul+1;
@@ -127,6 +139,7 @@ int __low_write(struct mem_t *mem){
     printk(KERN_INFO DEVICE_NAME ":     OPTEE_SMC_RESET_DUMMY: failure\n");
     return -1;
   }
+>>>>>>> origin/wonnie_optee
 
   printk(KERN_INFO DEVICE_NAME ":     wr calls : %ld\n", calls);
   printk(KERN_INFO DEVICE_NAME ":     call size: %d\n",W_REGS);
@@ -193,7 +206,9 @@ int __low_write(struct mem_t *mem){
 int __low_read(struct mem_t *mem){
   int sul = sizeof(unsigned long);
   char buffer[sul*R_REGS]; //buffer for one call
-  int i,k;
+  int i,j,k,index = 0;
+<<<<<<< HEAD
+=======
   //unsigned longs (ulongs) are the mean of transportation,
   //how many ulongs can we possiblly need in the worst case?
   unsigned long max_ulongs = PAGE_SIZE/sul;
@@ -201,10 +216,31 @@ int __low_read(struct mem_t *mem){
   //how many calls could we possible need we need for that number of ulongs
   unsigned long max_calls  = max_ulongs/R_REGS;
   
+>>>>>>> origin/wonnie_optee
   mem->size=0;
   printk(KERN_WARNING DEVICE_NAME ":         [low_read]\n");
   
   //reset cursor
+<<<<<<< HEAD
+  arm_smccc_smc(OPTEE_SMC_RESET_DUMMY,READ_CURSOR,0,0,&res);
+  //SILLY CORRECTNESS CHECK
+  if(res->a2!=OK){
+    printk(KERN_INFO DEVICE_NAME ":         arm_smccc_smc(write,0,0,...) failed\n");
+    return -1;
+  }
+
+  //unsigned longs (ulongs) are the mean of transportation,
+  //how many ulongs can we possiblly need in the worst case?
+  unsigned long max_ulongs = PAGE_SIZE/sul;
+  
+  //how many calls could we possible need we need for that number of ulongs
+  unsigned long max_calls  = max_ulongs/R_REGS;
+
+  
+  for(i=0; i<calls; ++i){    //for each call
+    arm_smccc_smc(OPTEE_SMC_READ_DUMMY,0,0,0,&res);
+    if(res->a0 != SUCCESS){
+=======
   arm_smccc_smc(OPTEE_SMC_RESET_DUMMY, 0,0,0,0,0,0,0,&res);
   //SILLY CORRECTNESS CHECK
   if(res.a0 != OPTEE_SMC_RETURN_OK){
@@ -221,15 +257,22 @@ int __low_read(struct mem_t *mem){
   for(i=0; i<max_calls; ++i){    //for each call
     arm_smccc_smc(OPTEE_SMC_READ_DUMMY,0,0,0,0,0,0,0,&res);
     if(res.a0 != OPTEE_SMC_RETURN_OK){
+>>>>>>> origin/wonnie_optee
       printk(KERN_INFO DEVICE_NAME ":         arm_smccc_smc(read,...) failed\n");
       return -1;
     }
     
     //copy the results into buffer array (everything)
     for(k=0; k<sul; ++k){
+<<<<<<< HEAD
+      buffer[k]        = ((char*) &(res->a1))[k];
+      buffer[sul+k]    = ((char*) &(res->a2))[k];
+      buffer[2*sul+k]  = ((char*) &(res->a3))[k];
+=======
       buffer[k]        = ((char*) &(res.a1))[k];
       buffer[sul+k]    = ((char*) &(res.a2))[k];
       buffer[2*sul+k]  = ((char*) &(res.a3))[k];
+>>>>>>> origin/wonnie_optee
     }
 
     // pass one char at the time to mem->data and increment mem->size,
@@ -254,6 +297,7 @@ ssize_t device_read(struct file* filp, char* userBuffer, size_t bufCount, loff_t
     bufCount = dum_dev.size;
     printk(KERN_INFO DEVICE_NAME ":     data read truncated to %ld\n",dum_dev.size);
   }
+<<<<<<< HEAD
   mem.size = 0;
   mem.data = kmalloc(PAGE_SIZE,GFP_KERNEL);
   if(!mem.data){
@@ -261,6 +305,12 @@ ssize_t device_read(struct file* filp, char* userBuffer, size_t bufCount, loff_t
     return -EACCES;
   }
   
+=======
+  mem.data = kmalloc(PAGE_SIZE,GFP_KERNEL);
+  mem.size = 0;
+  
+  
+>>>>>>> origin/wonnie_optee
   printk(KERN_INFO DEVICE_NAME ":     reading available chars from device\n");
 
   __low_read(&mem);
@@ -294,6 +344,7 @@ ssize_t device_write(struct file* filp, const char* userBuffer, size_t bufCount,
     return -1;
   }
   memset(mem.data,0,mem.size);
+  
   // copy_from_user(to,from,size)
   if(copy_from_user(mem.data,userBuffer,mem.size)){
     printk(KERN_INFO DEVICE_NAME ":     error in copy_from_user()\n");
@@ -392,14 +443,19 @@ long device_ioctl(struct file *filp, unsigned int cmd, unsigned long arg){
     break;
 
   case DUMMY_READ:
-    struct mem_t umem; //struct to return to the user
+    mem_t umem; //struct to return to the user
     printk(KERN_INFO DEVICE_NAME ":     command DUMMY_READ\n");
+<<<<<<< HEAD
     
     if(copy_from_user(&umem,(struct mem_t*)arg, sizeof(struct mem_t))){
+=======
+    if(copy_from_user(&mem,(struct mem_t*)arg, sizeof(struct mem_t))){
+>>>>>>> origin/wonnie_optee
       printk(KERN_INFO DEVICE_NAME ":     error in copy_from_user(struct)\n");
       return -EACCES;
     }
 
+<<<<<<< HEAD
     // mem is used by __low_read
     mem.size = 0;
     mem.data = kmalloc(PAGE_SIZE,GFP_KERNEL);
@@ -407,12 +463,17 @@ long device_ioctl(struct file *filp, unsigned int cmd, unsigned long arg){
       printk(KERN_INFO DEVICE_NAME ":     error allocating memory\n");
       return -1;
     }
+=======
+    mem.size = 0;
+    mem.data = kmalloc(PAGE_SIZE,GFP_KERNEL);
+>>>>>>> origin/wonnie_optee
     memset(mem.data,0,PAGE_SIZE);
 
     if(__low_read(&mem)){
       printk(KERN_INFO DEVICE_NAME ":     error in __low_read()\n");
       return -1;
     }
+<<<<<<< HEAD
 
     // filling up umem to be sent
     umem.size = mem.size;
@@ -433,6 +494,8 @@ long device_ioctl(struct file *filp, unsigned int cmd, unsigned long arg){
       kfree(mem.data);
       printk(KERN_INFO DEVICE_NAME ":     I am a responsable developer, mem unallocated :{)\n");
     }
+=======
+>>>>>>> origin/wonnie_optee
     break;
 
 
