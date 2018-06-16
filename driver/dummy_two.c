@@ -19,7 +19,6 @@
 #endif
 
 
-//#include "../include/ioctl_commands.h" //DUMMY_SYNC
 //struct for ioctl queries
 struct mem_t{
   unsigned long* data;
@@ -239,9 +238,12 @@ ssize_t device_read(struct file* filp, char* userBuffer, size_t bufCount, loff_t
     bufCount = dum_dev.size;
     printk(KERN_INFO DEVICE_NAME ":     data read truncated to %ld\n",dum_dev.size);
   }
-  mem.data = kmalloc(PAGE_SIZE,GFP_KERNEL);
   mem.size = 0;
-  
+  mem.data = kmalloc(PAGE_SIZE,GFP_KERNEL);
+  if(!mem.data){
+    printk(KERN_INFO DEVICE_NAME ":     error allocating memory\n");
+    return -EACCES;
+  }
   
   printk(KERN_INFO DEVICE_NAME ":     reading available chars from device\n");
 
@@ -251,7 +253,12 @@ ssize_t device_read(struct file* filp, char* userBuffer, size_t bufCount, loff_t
   // copy_to_user(to,from,size)
   if(copy_to_user(userBuffer, mem.data, mem.size)){
     printk(KERN_INFO DEVICE_NAME ":     error in copy_to_user\n");
-      return -EACCES;
+    return -EACCES;
+  }
+
+  if(mem.data){
+    kfree(mem.data);
+    printk(KERN_INFO DEVICE_NAME ":     I am a responsable developer, mem unallocated :{)\n");
   }
   printk(KERN_INFO DEVICE_NAME ":     read\n");
   return ret;
@@ -266,7 +273,12 @@ ssize_t device_write(struct file* filp, const char* userBuffer, size_t bufCount,
     printk(KERN_INFO DEVICE_NAME ":     data to write truncated to %ld\n",dum_dev.size);
   }
   mem.data = kmalloc(mem.size,GFP_KERNEL);
+  if(!mem.data){
+    printk(KERN_INFO DEVICE_NAME ":     error allocating memory\n");
+    return -1;
+  }
   memset(mem.data,0,mem.size);
+  
   // copy_from_user(to,from,size)
   if(copy_from_user(mem.data,userBuffer,mem.size)){
     printk(KERN_INFO DEVICE_NAME ":     error in copy_from_user()\n");
@@ -277,7 +289,10 @@ ssize_t device_write(struct file* filp, const char* userBuffer, size_t bufCount,
     printk(KERN_INFO DEVICE_NAME ":     error in __low_write()\n");
     return -1;
   }
-  
+  if(mem.data){
+    kfree(mem.data);
+    printk(KERN_INFO DEVICE_NAME ":     I am a responsable developer, mem unallocated :{)\n");
+  }
   printk(KERN_INFO DEVICE_NAME ":     %ld chars written into device\n",mem.size);
   printk(KERN_INFO DEVICE_NAME ":     written\n");
   return 0;
@@ -287,6 +302,9 @@ ssize_t device_write(struct file* filp, const char* userBuffer, size_t bufCount,
 //mmap method, maps allocated memory into userspace
 int device_mmap(struct file *filp, struct vm_area_struct *vma){
   printk(KERN_WARNING DEVICE_NAME ": [mmaping]\n");
+#if FOR_OPTEE
+  printk(KERN_INFO DEVICE_NAME ":     Not implemented... yet\n");
+#else
   /**
    * remap_pfn_range - remap kernel memory to userspace
    * int remap_pfn_range(struct vm_area_struct* vma, // user vma to map to 
@@ -303,6 +321,8 @@ int device_mmap(struct file *filp, struct vm_area_struct *vma){
 		     vma->vm_page_prot))
     return -EAGAIN;
   vma->vm_flags |= VM_LOCKED | (VM_DONTEXPAND | VM_DONTDUMP);
+
+#endif
   printk(KERN_INFO DEVICE_NAME ":     mmaped\n");
   return 0;
 }
@@ -316,6 +336,7 @@ long device_ioctl(struct file *filp, unsigned int cmd, unsigned long arg){
 
   case DUMMY_SYNC:
     printk(KERN_INFO DEVICE_NAME ":     command DUMMY_SYNC\n");
+    printk(KERN_INFO DEVICE_NAME ":     Not implemented... yet\n");
     break;
 
 
@@ -333,6 +354,10 @@ long device_ioctl(struct file *filp, unsigned int cmd, unsigned long arg){
 
     udata = mem.data;
     mem.data = kmalloc(mem.size,GFP_KERNEL);
+    if(!mem.data){
+      printk(KERN_INFO DEVICE_NAME ":     error allocating memory\n");
+      return -1;
+    }
     memset(mem.data,0,mem.size);
     
     if(copy_from_user(mem.data,udata,mem.size)){
@@ -344,22 +369,54 @@ long device_ioctl(struct file *filp, unsigned int cmd, unsigned long arg){
       printk(KERN_INFO DEVICE_NAME ":     error in __low_write()\n");
       return -1;
     }
+
+    if(mem.data){
+    kfree(mem.data);
+    printk(KERN_INFO DEVICE_NAME ":     I am a responsable developer, mem unallocated :{)\n");
+  }
     break;
 
   case DUMMY_READ:
+    mem_t umem; //struct to return to the user
     printk(KERN_INFO DEVICE_NAME ":     command DUMMY_READ\n");
-    if(copy_from_user(&mem,(struct mem_t*)arg, sizeof(struct mem_t))){
+    
+    if(copy_from_user(&umem,(struct mem_t*)arg, sizeof(struct mem_t))){
       printk(KERN_INFO DEVICE_NAME ":     error in copy_from_user(struct)\n");
       return -EACCES;
     }
 
+    // mem is used by __low_read
     mem.size = 0;
     mem.data = kmalloc(PAGE_SIZE,GFP_KERNEL);
+    if(!mem.data){
+      printk(KERN_INFO DEVICE_NAME ":     error allocating memory\n");
+      return -1;
+    }
     memset(mem.data,0,PAGE_SIZE);
 
     if(__low_read(&mem)){
       printk(KERN_INFO DEVICE_NAME ":     error in __low_read()\n");
       return -1;
+    }
+
+    // filling up umem to be sent
+    umem.size = mem.size;
+    
+    // copying structure (and its .size value)
+    if(copy_to_user((struct mem_t*)arg, &umem, sizeof(struct mem_t))){
+      printk(KERN_INFO DEVICE_NAME ":     error in copy_to_user(struct)\n");
+      return -EACCES;
+    }
+
+    // copying data to user's structure
+    if(copy_to_user(umem.data, mem.data, mem.size)){
+      printk(KERN_INFO DEVICE_NAME ":     error in copy_to_user(data)\n");
+      return -EACCES;
+    }
+
+    if(mem.data){
+      kfree(mem.data);
+      printk(KERN_INFO DEVICE_NAME ":     I am a responsable developer, mem unallocated :{)\n");
     }
     break;
 
@@ -379,7 +436,7 @@ int device_close(struct inode *inode, struct file *filp){
     dum_dev.size=0;
   }
   up(&dum_dev.sem);
-  printk(KERN_INFO DEVICE_NAME ":     closed\n");
+  printk(KERN_INFO DEVICE_NAME ":     Good bye\n");
   return 0;
 }
 

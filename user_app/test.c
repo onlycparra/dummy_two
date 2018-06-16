@@ -130,7 +130,9 @@ int main(){
       struct mem_t umem;
       printf(MAG "  ioctl write\n" RES);
       printf("  data: ");
-      umem.data = malloc(page_size);
+      umem.size = page_size;
+      umem.data = malloc(umem.size);
+      memset(umem.data,0,umem.size);
       if(!scanf("%[^\n]",(char*)umem.data)){//store everything up to just before \n
 	printf("  No modification\n");
       }else{
@@ -141,17 +143,24 @@ int main(){
 	  printf(BRE "  fail\n" RES);
 	}
       }
+      if(umem.data){
+	free(mem.data);
+      }
     }
 
     else if(!strcmp(option,"ir")){
       struct mem_t umem;
-      umem.size=0;
-      umem.data = malloc(page_size);
       printf(MAG "  ioctl read\n" RES);
+      umem.size=page_size;
+      umem.data = malloc(umem.size);
+      memset(umem.data,0,umem.size);
       if(!ioctl(fd,DUMMY_READ,&umem)){
 	printf("  data: [" YEL "%s" RES "]\n",(char*)umem.data);
       }else{
 	printf(BRE "  fail\n" RES);
+      }
+      if(umem.data){
+	free(mem.data);
       }
     }
 
