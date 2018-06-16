@@ -8,6 +8,16 @@
 #include <linux/mm.h>        //vm_area_struct, PAGE_SIZE
 #include "../include/ioctl_commands.h" //DUMMY_SYNC
 
+//struct for ioctl queries
+struct mem_t{
+  char* data;
+  unsigned long size;
+};
+
+#define DUMMY_SYNC   _IO('q', 1001)
+#define DUMMY_WRITE _IOW('q', 1002, struct mem_t*)
+#define DUMMY_READ  _IOW('q', 1003, struct mem_t*)
+
 //struct for device
 struct Dummy_device{
   char* data;
@@ -74,29 +84,29 @@ int device_open(struct inode *inode, struct file *filp){
 
 ssize_t device_read(struct file* filp, char* userBuffer, size_t bufCount, loff_t* curOffset){
   printk(KERN_WARNING DEVICE_NAME ": [reading]\n");
-  if(bufCount > dum_dev.size){
-    bufCount = dum_dev.size;
+  if(bufCount > PAGE_SIZE){
+    bufCount = PAGE_SIZE;
     printk(KERN_INFO DEVICE_NAME ":     data read truncated to %ld\n",dum_dev.size);
   }
   
   // move data from kernel space (device) to user space (process).
   // copy_to_user(to,from,size)
-  printk(KERN_INFO DEVICE_NAME ":     reading %ld chars from device\n",bufCount);
-  ret = copy_to_user(userBuffer,dum_dev.data,bufCount);
+  printk(KERN_INFO DEVICE_NAME ":     reading %ld chars from device\n",dum_dev.size);
+  ret = copy_to_user(userBuffer,dum_dev.data,PAGE_SIZE);
   printk(KERN_INFO DEVICE_NAME ":     read\n");
   return ret;
 }
 
 ssize_t device_write(struct file* filp, const char* userBuffer, size_t bufCount, loff_t* curOffset){
   printk(KERN_WARNING DEVICE_NAME ": [writing]\n");
-  if(bufCount > dum_dev.size){
-    bufCount = dum_dev.size;
+  if(bufCount > PAGE_SIZE){
+    bufCount = PAGE_SIZE;
     printk(KERN_INFO DEVICE_NAME ":     data to write truncated to %ld\n",dum_dev.size);
   }
-  
+  dum_dev.size=bufCount;
   // move data from the user space (process) to the kernel space (device).
   // copy_from_user(to,from,size)
-  ret = copy_from_user(dum_dev.data,userBuffer,bufCount);
+  ret = copy_from_user(dum_dev.data,userBuffer,PAGE_SIZE);
   printk(KERN_INFO DEVICE_NAME ":     %ld chars written into device\n",bufCount);
   printk(KERN_INFO DEVICE_NAME ":     written\n");
   return ret;
@@ -127,11 +137,58 @@ int device_mmap(struct file *filp, struct vm_area_struct *vma){
 }
 
 long device_ioctl(struct file *filp, unsigned int cmd, unsigned long arg){
+  struct mem_t mem;
   printk(KERN_WARNING DEVICE_NAME ": [ioctl-ing]\n");
   switch(cmd){
+
+
   case DUMMY_SYNC:
-    printk(KERN_INFO DEVICE_NAME ":     command 1001\n");
+    printk(KERN_INFO DEVICE_NAME ":     command DUMMY_SYNC\n");
+    printk(KERN_INFO DEVICE_NAME ":     Not implemented... yet\n");
     break;
+
+
+  case DUMMY_WRITE:
+    printk(KERN_INFO DEVICE_NAME ":     command DUMMY_WRITE\n");
+    if(copy_from_user(&mem,(struct mem_t*)arg, sizeof(struct mem_t))){
+      printk(KERN_INFO DEVICE_NAME ":     error in copy_from_user(struct)\n");
+      return -EACCES;
+    }
+
+    if(mem.size > PAGE_SIZE){
+      mem.size = PAGE_SIZE;
+      printk(KERN_INFO DEVICE_NAME ":     data to write truncated to %ld\n",dum_dev.size);
+    }
+    dum_dev.size=mem.size;
+    printk(KERN_INFO DEVICE_NAME ":     writing %ld chars to device\n",dum_dev.size);
+    if(copy_from_user(dum_dev.data,mem.data,PAGE_SIZE)){
+      printk(KERN_INFO DEVICE_NAME ":     error in copy_from_user(data)\n");
+      return -EACCES;
+    }
+    break;
+
+    case DUMMY_READ:
+    printk(KERN_INFO DEVICE_NAME ":     command DUMMY_READ\n");
+    
+    if(copy_from_user(&mem,(struct mem_t*)arg, sizeof(struct mem_t))){
+      printk(KERN_INFO DEVICE_NAME ":     error in copy_from_user(struct)\n");
+      return -EACCES;
+    }
+    mem.size = dum_dev.size;
+    printk(KERN_INFO DEVICE_NAME ":     reading %ld chars from device\n",mem.size);
+    // copying structure (and its .size value)
+    if(copy_to_user((struct mem_t*)arg, &mem, sizeof(struct mem_t))){
+      printk(KERN_INFO DEVICE_NAME ":     error in copy_to_user(struct)\n");
+      return -EACCES;
+    }
+
+    // copying data to user's structure
+    if(copy_to_user(mem.data, dum_dev.data, PAGE_SIZE)){
+      printk(KERN_INFO DEVICE_NAME ":     error in copy_to_user(data)\n");
+      return -EACCES;
+    }
+    break;
+    
   default:
     printk(KERN_INFO DEVICE_NAME ":     command %d not valid\n",cmd);
   }
