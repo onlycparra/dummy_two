@@ -16,7 +16,7 @@ struct mem_t{
 
 #define DUMMY_SYNC   _IO('q', 1001)
 #define DUMMY_WRITE _IOW('q', 1002, struct mem_t*)
-#define DUMMY_READ  _IOW('q', 1003, struct mem_t*)
+#define DUMMY_READ  _IOR('q', 1003, struct mem_t*)
 
 //struct for device
 struct Dummy_device{
