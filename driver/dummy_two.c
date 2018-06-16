@@ -1,4 +1,4 @@
-#define FOR_OPTEE 0  //for conditional compilation
+#define FOR_OPTEE 1  //for conditional compilation
 #define DEVICE_NAME "dummy_two"
 #define R_REGS 3 //registers availables to read in one smc read
 #define W_REGS 4 //registers availables to write in one smc write
@@ -53,6 +53,8 @@ ssize_t device_write(struct file* filp, const char* userBuffer, size_t bufCount,
 int device_close(struct inode *inode, struct file *filp);
 int device_mmap(struct file *filp, struct vm_area_struct *vma);
 long device_ioctl(struct file *filp, unsigned int cmd, unsigned long arg);
+int __low_write(struct mem_t *mem);
+int __low_read(struct mem_t *mem);
 
 // tell the kernel what functions to call when the user operates in our device file.
 struct file_operations fops = {
@@ -84,7 +86,7 @@ int device_open(struct inode *inode, struct file *filp){
     return -1;
   }
   printk(KERN_INFO DEVICE_NAME ":     OPTEE_SMC_RETURN: ok\n");
-  if(res.a1 != OPTEE_SMC_OPEN_DUMMY_SUCCESS){
+  if(res.a1 != OPTEE_SMC_DUMMY_SUCCESS){
     printk(KERN_INFO DEVICE_NAME ":     OPTEE_SMC_OPEN_DUMMY: failure\n");
     return -1;
   }
@@ -106,16 +108,25 @@ int __low_write(struct mem_t *mem){
   int sul = sizeof(unsigned long);
   char args[sul*W_REGS];
   int i,j,k,index = 0;
-  
-  //reset cursor
-  arm_smccc_smc(OPTEE_SMC_RESET_DUMMY,WRITE_CURSOR,0,0,&res);
-  
   //unsigned longs (ulongs) are the mean of transportation:
   //how many ulongs do we need to move the data?
   unsigned long ulongs = mem->size%sul == 0 ? mem->size/sul : mem->size/sul+1;
-  
+
   //how many calls do we need for that number of ulongs
   unsigned long calls  = ulongs%W_REGS==0 ? ulongs/W_REGS : ulongs/W_REGS+1;
+  
+
+  //reset cursor
+  arm_smccc_smc(OPTEE_SMC_RESET_DUMMY, 1, 0, 0, 0, 0, 0, 0, &res);
+  if(res.a0 != OPTEE_SMC_RETURN_OK){
+    printk(KERN_INFO DEVICE_NAME ":     OPTEE_SMC_RETURN: failure\n");
+    return -1;
+  }
+  printk(KERN_INFO DEVICE_NAME ":     OPTEE_SMC_RETURN: ok\n");
+  if(res.a1 != OPTEE_SMC_DUMMY_SUCCESS){
+    printk(KERN_INFO DEVICE_NAME ":     OPTEE_SMC_RESET_DUMMY: failure\n");
+    return -1;
+  }
 
   printk(KERN_INFO DEVICE_NAME ":     wr calls : %ld\n", calls);
   printk(KERN_INFO DEVICE_NAME ":     call size: %d\n",W_REGS);
@@ -147,7 +158,7 @@ int __low_write(struct mem_t *mem){
 	printk(KERN_INFO DEVICE_NAME ":     OPTEE_SMC_WRITE_DUMMY OK\n");
     }
 
-    if(res.a1 != OPTEE_SMC_OPEN_DUMMY_SUCCESS){
+    if(res.a1 != OPTEE_SMC_DUMMY_SUCCESS){
         printk(KERN_INFO DEVICE_NAME ":     OPTEE_SMC_WRITE_DUMMY: failure - writing thread\n");
         return -1;
     } 
@@ -183,37 +194,42 @@ int __low_read(struct mem_t *mem){
   int sul = sizeof(unsigned long);
   char buffer[sul*R_REGS]; //buffer for one call
   int i,j,k,index = 0;
+  //unsigned longs (ulongs) are the mean of transportation,
+  //how many ulongs can we possiblly need in the worst case?
+  unsigned long max_ulongs = PAGE_SIZE/sul;
+                                    
+  //how many calls could we possible need we need for that number of ulongs
+  unsigned long max_calls  = max_ulongs/R_REGS;
+  
   mem->size=0;
   printk(KERN_WARNING DEVICE_NAME ":         [low_read]\n");
   
   //reset cursor
-  arm_smccc_smc(OPTEE_SMC_RESET_DUMMY,READ_CURSOR,0,0,&res);
+  arm_smccc_smc(OPTEE_SMC_RESET_DUMMY, 0,0,0,0,0,0,0,&res);
   //SILLY CORRECTNESS CHECK
-  if(res->a2!=OK){
+  if(res.a0 != OPTEE_SMC_RETURN_OK){
     printk(KERN_INFO DEVICE_NAME ":         arm_smccc_smc(write,0,0,...) failed\n");
     return -1;
   }
-
-  //unsigned longs (ulongs) are the mean of transportation,
-  //how many ulongs can we possiblly need in the worst case?
-  unsigned long max_ulongs = PAGE_SIZE/sul;
-  
-  //how many calls could we possible need we need for that number of ulongs
-  unsigned long max_calls  = max_ulongs/R_REGS;
+  printk(KERN_INFO DEVICE_NAME ":     OPTEE_SMC_RETURN: ok\n");
+  if(res.a1 != OPTEE_SMC_DUMMY_SUCCESS){
+    printk(KERN_INFO DEVICE_NAME ":     OPTEE_SMC_RESET_DUMMY: failure\n");
+    return -1;
+  }
 
   
-  for(i=0; i<calls; ++i){    //for each call
-    arm_smccc_smc(OPTEE_SMC_READ_DUMMY,0,0,0,&res);
-    if(res->a0 != SUCCESS){
+  for(i=0; i<max_calls; ++i){    //for each call
+    arm_smccc_smc(OPTEE_SMC_READ_DUMMY,0,0,0,0,0,0,0,&res);
+    if(res.a0 != OPTEE_SMC_RETURN_OK){
       printk(KERN_INFO DEVICE_NAME ":         arm_smccc_smc(read,...) failed\n");
       return -1;
     }
     
     //copy the results into buffer array (everything)
     for(k=0; k<sul; ++k){
-      buffer[k]        = ((char*) &(res->a1))[k];
-      buffer[sul+k]    = ((char*) &(res->a2))[k];
-      buffer[2*sul+k]  = ((char*) &(res->a3))[k];
+      buffer[k]        = ((char*) &(res.a1))[k];
+      buffer[sul+k]    = ((char*) &(res.a2))[k];
+      buffer[2*sul+k]  = ((char*) &(res.a3))[k];
     }
 
     // pass one char at the time to mem->data and increment mem->size,
@@ -278,7 +294,6 @@ ssize_t device_write(struct file* filp, const char* userBuffer, size_t bufCount,
     return -1;
   }
   memset(mem.data,0,mem.size);
-  
   // copy_from_user(to,from,size)
   if(copy_from_user(mem.data,userBuffer,mem.size)){
     printk(KERN_INFO DEVICE_NAME ":     error in copy_from_user()\n");
